@@ -1,0 +1,90 @@
+---
+title: "Weight Lifting Exercise Prediction"
+author: "Ainun Najib"
+date: "22 February 2015"
+output: html_document
+---
+
+**Summary:** This is a report on Predictive Analysis of exercise class on Weight Lifting Exercise dataset.
+
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(dplyr)
+library(ggplot2)
+```
+
+The training dataset is taken from http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The goal of this analysis is to predict `classe` attribute of the dataset based on the rest of the data.  
+
+Let's now import and do initial overview of the dataset.
+
+```{r}
+trainData <- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+summary(trainData)
+```
+
+We see that there are some variables which has many NAs and we also see that there are values of blanks and `#DIV/0!`. 
+Let's now reimport again with specifying blanks and `#DIV/0` as `NA` and see how large is NA's proportions on this dataset's variables.
+
+```{r}
+trainData <- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                      strip.white = TRUE,
+                      na.strings = c("NA", "#DIV/0", ""))
+NApercentage <- function(x) { round(100*sum(is.na(x))/(sum(is.na(x)) + sum(!is.na(x))), 3) }
+sapply(trainData, NApercentage)
+```
+
+We can see that the variables are of two sets, most are having 0.00% NA values (meaning 100.00% valid values) while the rest have almost 98% invalid values. It is then reasonable for us to ignore these mostly invalid variables. Further looks into the data shows that records which has non-NA values for these variables belong to the same set of 406 records i.e. those having `new_window == "yes"`, we will ignore these records as well.
+
+```{r}
+validVars <- names(which(sapply(trainData, NApercentage) == 0))
+trainData <- trainData[, validVars]
+trainData <- trainData %>% filter(new_window != "yes")
+colnames(trainData)
+```
+
+Now we see each attributes to see which ones are relevant for the analysis. We can see that timestamp related attributes are inherently irrelevant in determining the class of the exercise, as any exercise can be done at any time. Likewise, `user_name` is also irrelevant as anyone can do any of the exercise. `X` is irrelevant as it is basically a sequence number, similarly `num_window` as well. We also see that `new_window` now contains only `no` value, thus has no use in predicting the class. We will ignore these attributes.
+
+```{r}
+relevantVars <- validVars[-grep('.*timestamp.*', validVars)]
+relevantVars <- relevantVars[-grep('.*user_name.*', relevantVars)]
+relevantVars <- relevantVars[-grep('.*window.*', relevantVars)]
+relevantVars <- relevantVars[-grep('X', relevantVars)]
+trainData <- trainData[, relevantVars]
+```
+
+### Prediction model
+Let's now build the prediction model. We will predict `classe` against the `predictors` which we have established. We will use Random Forest method. Before that, we will partition the train dataset for cross validation purpose, let's take only 80% of the dataset for training and 20% for validation.
+
+```{r}
+set.seed(313)
+trainrecords <- createDataPartition(trainData$classe, p = 0.8, list = FALSE)
+trainset <- trainData[trainrecords, ]
+validationset <- trainData[-trainrecords, ]
+# build the prediction model
+model <- randomForest(classe ~ ., data = trainset)
+model
+```
+
+### Cross Validation
+From the model we see the estimate of the error is 0.4%.
+Let's now do cross-validation with the 20% of the train data we've separated previously, and cross-check the error estimate.
+
+```{r}
+validationPredictions <- predict(model, validationset)
+confusionMatrix(validationPredictions, validationset$classe)
+```
+
+We see that the 95% confidence interval of the validation's accuracy is (0.990 - 0.996) meaning the error estimate interval is (0.004 - 0.010) which is close to our trainset error estimate.
+
+## Prediction of test data
+Let's now perform the prediction of test set.
+
+```{r}
+testData <- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                      strip.white = TRUE,
+                      na.strings = c("NA", "#DIV/0", ""))
+predictions <- predict(model, testData)
+predictions
+```
